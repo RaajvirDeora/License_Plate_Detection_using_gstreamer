@@ -1,0 +1,71 @@
+# =========================
+# OS FILES
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# PYTHON BACKEND
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Environment variables
+.env
+.env.*
+
+# Django / Flask stuff
+*.sqlite3
+db.sqlite3
+instance/
+.webassets-cache
+
+# Logs
+*.log
+
+# Testing / coverage
+.coverage
+coverage/
+htmlcov/
+.pytest_cache/
+
+# =========================
+# REACT FRONTEND
+# =========================
+node_modules/
+
+# Build folders
+build/
+dist/
+
+# React logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# =========================
+# IDE / EDITOR
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =========================
+# PACKAGE LOCK (OPTIONAL)
+# =========================
+# Uncomment if you don’t want lock files
+# package-lock.json
+# yarn.lock
+
+# =========================
+# MISC
+# =========================
+*.bak
+*.tmp
