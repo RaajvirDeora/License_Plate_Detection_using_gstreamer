@@ -12,6 +12,7 @@ __pycache__/
 *$py.class
 
 # Virtual environment
+.venv/
 venv/
 env/
 ENV/
@@ -69,3 +70,10 @@ yarn-error.log*
 # =========================
 *.bak
 *.tmp
+
+
+# =========================
+# OPEN CV REPO
+# =========================
+opencv
+opencv_contrib
