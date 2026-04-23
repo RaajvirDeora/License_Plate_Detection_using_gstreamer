@@ -2,8 +2,6 @@ from flask import Flask, Response, jsonify, request
 from flask_cors import CORS
 
 from db import *
-from detection import generate_frames, detection_active
-
 import detection
 
 app = Flask(__name__)
@@ -12,14 +10,15 @@ CORS(app)
 
 @app.route("/api/stream")
 def stream():
-    detection.detection_active = True
-    return Response(generate_frames(),
-        mimetype="multipart/x-mixed-replace; boundary=frame")
+    return Response(
+        detection.generate_frames(),
+        mimetype="multipart/x-mixed-replace; boundary=frame"
+    )
 
 
 @app.route("/api/stop", methods=["POST"])
 def stop_stream():
-    detection.detection_active = False
+    detection.release_camera()
     return jsonify({"status": "stopped"})
 
 
@@ -42,4 +41,4 @@ def health():
 
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True)
+    app.run(debug=True, threaded=True,use_reloader=False)
