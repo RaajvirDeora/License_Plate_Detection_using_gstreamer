@@ -3,3 +3,4 @@ flask-cors==4.0.1
 opencv-python==4.10.0.84
 easyocr==1.7.1
 numpy==1.26.4
+onnxruntime-gpu==1.18.0

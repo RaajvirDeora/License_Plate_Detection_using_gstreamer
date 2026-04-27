@@ -4,19 +4,24 @@ import datetime
 import threading
 import re
 import time
+import numpy as np
+import onnxruntime as ort
 
 from db import save_plate
 
 # ─── INIT ─────────────────────────────────────────────
 reader = easyocr.Reader(['en'], gpu=False)
 
-CASCADE_PATH = "/home/raajvir/Desktop/License_Plate_Detection_using_gstreamer/backend/opencv/data/haarcascades/haarcascade_russian_plate_number.xml"
-cascade = cv2.CascadeClassifier(CASCADE_PATH)
-
-if cascade.empty():
-    print("❌ Cascade not loaded")
+# Smart provider selection (GPU if available)
+providers = ort.get_available_providers()
+if "CUDAExecutionProvider" in providers:
+    print("🚀 Using GPU")
+    session = ort.InferenceSession("./model/best.onnx", providers=["CUDAExecutionProvider"])
 else:
-    print("✅ Cascade loaded")
+    print("🧠 Using CPU")
+    session = ort.InferenceSession("./model/best.onnx", providers=["CPUExecutionProvider"])
+
+input_name = session.get_inputs()[0].name
 
 camera = None
 camera_lock = threading.Lock()
@@ -45,29 +50,77 @@ def clean_plate_text(text):
     return re.sub(r'[^A-Z0-9]', '', text.upper())
 
 
-# ─── DETECTION ────────────────────────────────────────
+def preprocess_for_yolo(frame):
+    img = cv2.resize(frame, (640, 640))
+    img = img.astype("float32") / 255.0
+    img = img.transpose(2, 0, 1)
+    img = np.expand_dims(img, axis=0)
+    return img
+
+
+# ─── YOLO DETECTION ───────────────────────────────────
 def detect_plates(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    plates = cascade.detectMultiScale(gray, 1.1, 5, minSize=(60, 20))
+    h, w, _ = frame.shape
+    input_tensor = preprocess_for_yolo(frame)
+
+    outputs = session.run(None, {input_name: input_tensor})
+    preds = np.squeeze(outputs[0])
+
+    # Normalize shape → (N,5)
+    if len(preds.shape) == 2:
+        if preds.shape[0] < preds.shape[1]:
+            preds = preds.T
+
+    boxes = []
+    scores = []
+
+    # Collect boxes
+    for det in preds:
+        if len(det) < 5:
+            continue
+
+        x, y, bw, bh, conf = det[:5]
+
+        if conf < 0.4:
+            continue
+
+        x1 = int((x - bw / 2) * w / 640)
+        y1 = int((y - bh / 2) * h / 640)
+        x2 = int((x + bw / 2) * w / 640)
+        y2 = int((y + bh / 2) * h / 640)
+
+        boxes.append([x1, y1, x2 - x1, y2 - y1])
+        scores.append(float(conf))
 
     results = []
 
-    for (x, y, w, h) in plates:
-        roi = frame[y:y+h, x:x+w]
-        proc = preprocess_for_ocr(roi)
-        ocr_out = reader.readtext(proc)
+    # ─── NMS (VERY IMPORTANT) ───
+    if len(boxes) > 0:
+        indices = cv2.dnn.NMSBoxes(boxes, scores, 0.4, 0.5)
 
-        for (_, text, conf) in ocr_out:
-            cleaned = clean_plate_text(text)
+        for i in indices:
+            i = i[0] if isinstance(i, (list, tuple)) else i
 
-            if len(cleaned) >= 4 and conf > 0.3:
-                results.append((cleaned, round(conf, 3)))
+            x, y, bw, bh = boxes[i]
+            roi = frame[y:y+bh, x:x+bw]
 
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0,255,0), 2)
-                cv2.putText(frame, cleaned,
-                            (x, y-8),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.7, (0,255,0), 2)
+            if roi.size == 0:
+                continue
+
+            proc = preprocess_for_ocr(roi)
+            ocr_out = reader.readtext(proc)
+
+            for (_, text, ocr_conf) in ocr_out:
+                cleaned = clean_plate_text(text)
+
+                if len(cleaned) >= 4 and ocr_conf > 0.3:
+                    results.append((cleaned, round(ocr_conf, 3)))
+
+                    cv2.rectangle(frame, (x, y), (x+bw, y+bh), (0,255,0), 2)
+                    cv2.putText(frame, cleaned,
+                                (x, y-8),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7, (0,255,0), 2)
 
     return frame, results
 
@@ -83,7 +136,7 @@ def get_camera():
             camera = cv2.VideoCapture(GSTREAMER_PIPELINE, cv2.CAP_GSTREAMER)
 
             if not camera.isOpened():
-                print("❌ GStreamer failed, falling back to default camera")
+                print("❌ GStreamer failed, fallback to default camera")
                 camera = cv2.VideoCapture(0)
 
             if camera.isOpened():
@@ -107,7 +160,7 @@ def generate_frames():
     global frame_count, last_detected
 
     cam = get_camera()
-        # warm-up camera
+
     for _ in range(5):
         cam.read()
 
@@ -117,27 +170,30 @@ def generate_frames():
         print("❌ No camera available")
         return
 
-    print("🟢 Stream started")
-
     try:
         while True:
             success, frame = cam.read()
 
             if not success:
-                print("⚠️ Frame read failed")
                 continue
 
             frame = cv2.resize(frame, (640, 360))
             frame_count += 1
 
-            # Run OCR every 5 frames
-            if frame_count % 5 == 0:
-                annotated, results = detect_plates(frame)
-            else:
+            try:
+                # Run detection every 10 frames (latency control)
+                if frame_count % 10 == 0:
+                    annotated, results = detect_plates(frame)
+                else:
+                    annotated = frame
+                    results = []
+
+            except Exception as e:
+                print("⚠️ Detection error:", e)
                 annotated = frame
                 results = []
 
-            # Save results
+            # debounce save
             for (plate, conf) in results:
                 now = datetime.datetime.now().timestamp()
                 last_time = last_detected.get(plate, 0)
@@ -146,7 +202,6 @@ def generate_frames():
                     save_plate(plate, conf)
                     last_detected[plate] = now
 
-            # Prevent browser freeze
             annotated[0, 0, 0] = (annotated[0, 0, 0] + 1) % 255
 
             ret, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 60])
