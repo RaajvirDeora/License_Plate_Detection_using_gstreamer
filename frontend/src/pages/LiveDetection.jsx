@@ -12,7 +12,7 @@ export default function LiveDetection() {
   function startStream() {
     setStreaming(true);
 
-    // ✅ prevent multiple intervals
+    // prevent multiple intervals
     if (!pollRef.current) {
       pollRef.current = setInterval(fetchLatest, 1500);
     }

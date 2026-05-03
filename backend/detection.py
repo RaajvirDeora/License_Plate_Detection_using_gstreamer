@@ -29,6 +29,19 @@ last_detected = {}
 DEBOUNCE_SECONDS = 5
 frame_count = 0
 
+# ✅ ADDED: validation + correction
+def is_valid_indian_plate(text):
+    pattern = r'^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}$'
+    return re.match(pattern, text) is not None
+
+
+def correct_common_errors(text):
+    text = text.replace('O', '0')
+    text = text.replace('I', '1')
+    text = text.replace('B', '8')
+    return text
+
+
 # ─── GSTREAMER PIPELINE ───────────────────────────────
 GSTREAMER_PIPELINE = (
     "v4l2src device=/dev/video0 ! "
@@ -113,7 +126,15 @@ def detect_plates(frame):
             for (_, text, ocr_conf) in ocr_out:
                 cleaned = clean_plate_text(text)
 
-                if len(cleaned) >= 4 and ocr_conf > 0.3:
+                # ✅ ADDED: fix OCR mistakes
+                cleaned = correct_common_errors(cleaned)
+
+                # ✅ UPDATED FILTER (STRICT)
+                if (
+                    8 <= len(cleaned) <= 10 and
+                    ocr_conf > 0.6 and
+                    is_valid_indian_plate(cleaned)
+                ):
                     results.append((cleaned, round(ocr_conf, 3)))
 
                     cv2.rectangle(frame, (x, y), (x+bw, y+bh), (0,255,0), 2)
