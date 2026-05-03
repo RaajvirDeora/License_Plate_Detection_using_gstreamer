@@ -38,6 +38,9 @@ def delete_detection(plate_id):
 def health():
     return jsonify({"status": "ok"})
 
+@app.route("/api/stats", methods=["GET"])
+def stats():
+    return jsonify(get_stats())
 
 if __name__ == "__main__":
     init_db()

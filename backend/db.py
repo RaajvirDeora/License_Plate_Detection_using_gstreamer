@@ -160,3 +160,30 @@ def search_plate(query: str):
 
     con.close()
     return [dict(r) for r in rows]
+
+def get_stats():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    # Total detections
+    cursor.execute("SELECT COUNT(*) FROM detections")
+    total = cursor.fetchone()[0]
+
+    # Today's detections
+    cursor.execute("""
+        SELECT COUNT(*) FROM detections
+        WHERE DATE(timestamp) = DATE('now')
+    """)
+    today = cursor.fetchone()[0]
+
+    # Unique plates
+    cursor.execute("SELECT COUNT(DISTINCT plate) FROM detections")
+    unique = cursor.fetchone()[0]
+
+    conn.close()
+
+    return {
+        "total": total,
+        "today": today,
+        "unique": unique
+    }
