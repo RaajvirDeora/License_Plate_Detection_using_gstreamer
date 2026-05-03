@@ -9,10 +9,9 @@ import onnxruntime as ort
 
 from db import save_plate
 
-# ─── INIT ─────────────────────────────────────────────
+#  INIT 
 reader = easyocr.Reader(['en'], gpu=False)
 
-# Smart provider selection (GPU if available)
 providers = ort.get_available_providers()
 if "CUDAExecutionProvider" in providers:
     print("🚀 Using GPU")
@@ -29,20 +28,15 @@ last_detected = {}
 DEBOUNCE_SECONDS = 5
 frame_count = 0
 
-# ✅ ADDED: validation + correction
-def is_valid_indian_plate(text):
-    pattern = r'^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}$'
-    return re.match(pattern, text) is not None
 
-
+#  OPTIONAL CORRECTION (safer version) 
 def correct_common_errors(text):
     text = text.replace('O', '0')
     text = text.replace('I', '1')
-    text = text.replace('B', '8')
     return text
 
 
-# ─── GSTREAMER PIPELINE ───────────────────────────────
+#  GSTREAMER PIPELINE 
 GSTREAMER_PIPELINE = (
     "v4l2src device=/dev/video0 ! "
     "video/x-raw,format=YUY2,width=640,height=480,framerate=30/1 ! "
@@ -50,7 +44,7 @@ GSTREAMER_PIPELINE = (
     "appsink drop=true max-buffers=1 sync=false"
 )
 
-# ─── HELPERS ──────────────────────────────────────────
+#  HELPERS 
 def preprocess_for_ocr(region):
     gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2, fy=2)
@@ -71,7 +65,7 @@ def preprocess_for_yolo(frame):
     return img
 
 
-# ─── YOLO DETECTION ───────────────────────────────────
+#  YOLO DETECTION 
 def detect_plates(frame):
     h, w, _ = frame.shape
     input_tensor = preprocess_for_yolo(frame)
@@ -79,7 +73,6 @@ def detect_plates(frame):
     outputs = session.run(None, {input_name: input_tensor})
     preds = np.squeeze(outputs[0])
 
-    # Normalize shape → (N,5)
     if len(preds.shape) == 2:
         if preds.shape[0] < preds.shape[1]:
             preds = preds.T
@@ -87,7 +80,6 @@ def detect_plates(frame):
     boxes = []
     scores = []
 
-    # Collect boxes
     for det in preds:
         if len(det) < 5:
             continue
@@ -97,6 +89,7 @@ def detect_plates(frame):
         if conf < 0.4:
             continue
 
+        # keep your original working scaling
         x1 = int((x - bw / 2) * w / 640)
         y1 = int((y - bh / 2) * h / 640)
         x2 = int((x + bw / 2) * w / 640)
@@ -107,7 +100,7 @@ def detect_plates(frame):
 
     results = []
 
-    # ─── NMS (VERY IMPORTANT) ───
+    #  NMS 
     if len(boxes) > 0:
         indices = cv2.dnn.NMSBoxes(boxes, scores, 0.4, 0.5)
 
@@ -120,24 +113,20 @@ def detect_plates(frame):
             if roi.size == 0:
                 continue
 
+            # ✅ ALWAYS draw box (IMPORTANT FIX)
+            cv2.rectangle(frame, (x, y), (x+bw, y+bh), (0,255,0), 2)
+
             proc = preprocess_for_ocr(roi)
             ocr_out = reader.readtext(proc)
 
             for (_, text, ocr_conf) in ocr_out:
                 cleaned = clean_plate_text(text)
-
-                # ✅ ADDED: fix OCR mistakes
                 cleaned = correct_common_errors(cleaned)
 
-                # ✅ UPDATED FILTER (STRICT)
-                if (
-                    8 <= len(cleaned) <= 10 and
-                    ocr_conf > 0.6 and
-                    is_valid_indian_plate(cleaned)
-                ):
+                # ✅ SIMPLIFIED OCR FILTER
+                if len(cleaned) >= 5 and ocr_conf > 0.3:
                     results.append((cleaned, round(ocr_conf, 3)))
 
-                    cv2.rectangle(frame, (x, y), (x+bw, y+bh), (0,255,0), 2)
                     cv2.putText(frame, cleaned,
                                 (x, y-8),
                                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -146,7 +135,7 @@ def detect_plates(frame):
     return frame, results
 
 
-# ─── CAMERA ───────────────────────────────────────────
+#  CAMERA 
 def get_camera():
     global camera
 
@@ -176,7 +165,7 @@ def release_camera():
             camera = None
 
 
-# ─── STREAM ───────────────────────────────────────────
+#  STREAM 
 def generate_frames():
     global frame_count, last_detected
 
@@ -202,7 +191,6 @@ def generate_frames():
             frame_count += 1
 
             try:
-                # Run detection every 10 frames (latency control)
                 if frame_count % 10 == 0:
                     annotated, results = detect_plates(frame)
                 else:
@@ -214,7 +202,6 @@ def generate_frames():
                 annotated = frame
                 results = []
 
-            # debounce save
             for (plate, conf) in results:
                 now = datetime.datetime.now().timestamp()
                 last_time = last_detected.get(plate, 0)

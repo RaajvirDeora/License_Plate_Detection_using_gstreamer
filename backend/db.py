@@ -1,15 +1,10 @@
 import sqlite3
 import datetime
 import os
-import re
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "plates.db")
 
 
-# ✅ Regex validation (Indian plate format)
-def is_valid_indian_plate(text):
-    pattern = r'^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{4}$'
-    return re.match(pattern, text) is not None
 
 
 def init_db():
@@ -30,9 +25,6 @@ def init_db():
 
 
 def save_plate(plate: str, confidence: float):
-    # ❗ FINAL FILTER (DB level safety)
-    if not is_valid_indian_plate(plate):
-        return
 
     now = datetime.datetime.now().isoformat(sep=" ", timespec="seconds")
 
